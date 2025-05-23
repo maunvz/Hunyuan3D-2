@@ -145,11 +145,11 @@ def load_image_from_base64(image):
 
 class ModelWorker:
     def __init__(self,
-                 model_path='tencent/Hunyuan3D-2mini',
+                 model_path='tencent/Hunyuan3D-2mv',
                  tex_model_path='tencent/Hunyuan3D-2',
-                 subfolder='hunyuan3d-dit-v2-mini-turbo',
+                 subfolder='hunyuan3d-dit-v2-mv',
                  device='cuda',
-                 enable_tex=False):
+                 enable_tex=True):
         self.model_path = model_path
         self.worker_id = worker_id
         self.device = device
@@ -167,8 +167,7 @@ class ModelWorker:
         #     'Tencent-Hunyuan/HunyuanDiT-v1.1-Diffusers-Distilled',
         #     device=device
         # )
-        if enable_tex:
-            self.pipeline_tex = Hunyuan3DPaintPipeline.from_pretrained(tex_model_path)
+        self.pipeline_tex = Hunyuan3DPaintPipeline.from_pretrained(tex_model_path)
 
     def get_queue_length(self):
         if model_semaphore is None:
@@ -185,18 +184,29 @@ class ModelWorker:
 
     @torch.inference_mode()
     def generate(self, uid, params):
-        if 'image' in params:
-            image = params["image"]
-            image = load_image_from_base64(image)
-        else:
-            if 'text' in params:
-                text = params["text"]
-                image = self.pipeline_t2i(text)
-            else:
-                raise ValueError("No input image or text provided")
+        if 'front' in params:
+            front_image = params["front"]
+            front_image = load_image_from_base64(front_image)
+            front_image = self.rembg(front_image)
+        if 'back' in params:
+            back_image = params["back"]
+            back_image = load_image_from_base64(back_image)
+            back_image = self.rembg(back_image)
+        if 'left' in params:
+            left_image = params["left"]
+            left_image = load_image_from_base64(left_image)
+            left_image = self.rembg(left_image)
+        if 'right' in params:
+            right_image = params["right"]
+            right_image = load_image_from_base64(right_image)
+            right_image = self.rembg(right_image)
 
-        image = self.rembg(image)
-        params['image'] = image
+        params['image'] = {
+            "front": front_image,
+            "back": back_image,
+            "left": left_image,
+            "right": right_image,
+        }
 
         if 'mesh' in params:
             mesh = trimesh.load(BytesIO(base64.b64decode(params["mesh"])), file_type='glb')
@@ -216,7 +226,7 @@ class ModelWorker:
             mesh = FloaterRemover()(mesh)
             mesh = DegenerateFaceRemover()(mesh)
             mesh = FaceReducer()(mesh, max_facenum=params.get('face_count', 40000))
-            mesh = self.pipeline_tex(mesh, image)
+            mesh = self.pipeline_tex(mesh, front_image)
 
         type = params.get('type', 'glb')
         with tempfile.NamedTemporaryFile(suffix=f'.{type}', delete=False) as temp_file:
@@ -301,7 +311,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8081)
-    parser.add_argument("--model_path", type=str, default='tencent/Hunyuan3D-2mini')
+    parser.add_argument("--model_path", type=str, default='tencent/Hunyuan3D-2mv')
     parser.add_argument("--tex_model_path", type=str, default='tencent/Hunyuan3D-2')
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--limit-model-concurrency", type=int, default=5)
